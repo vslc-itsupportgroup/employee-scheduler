@@ -3,13 +3,16 @@ import { authenticateToken, authorizeRole } from '../middleware/auth';
 import pool from '../config/database';
 import emailService from '../services/emailService';
 import crypto from 'crypto';
+import { isUserManagedBy } from '../utils/hierarchy';
 
 const router = express.Router();
 
 // Get pending approvals (manager/admin)
 router.get('/pending', authenticateToken, authorizeRole('manager', 'admin'), async (req, res) => {
   try {
-    const result = await pool.query(`
+    const user = (req as any).user;
+
+    let query = `
       SELECT 
         cr.id,
         cr.schedule_id,
@@ -28,8 +31,33 @@ router.get('/pending', authenticateToken, authorizeRole('manager', 'admin'), asy
       JOIN shift_types st_current ON s.shift_type_id = st_current.id
       JOIN shift_types st_requested ON cr.requested_shift_type_id = st_requested.id
       WHERE cr.status = 'pending'
-      ORDER BY cr.created_at DESC
-    `);
+    `;
+
+    const params: any[] = [];
+
+    if (user.role === 'manager') {
+      query += `
+        AND EXISTS (
+          WITH RECURSIVE managed_users AS (
+            SELECT id, manager_id
+            FROM users
+            WHERE manager_id = $1
+
+            UNION
+
+            SELECT u2.id, u2.manager_id
+            FROM users u2
+            INNER JOIN managed_users mu ON u2.manager_id = mu.id
+          )
+          SELECT 1 FROM managed_users WHERE id = s.employee_id
+        )
+      `;
+      params.push(user.id);
+    }
+
+    query += ' ORDER BY cr.created_at DESC';
+
+    const result = await pool.query(query, params);
     
     res.json(result.rows);
   } catch (error) {
@@ -43,10 +71,30 @@ router.post('/:changeRequestId', authenticateToken, authorizeRole('manager', 'ad
   try {
     const { changeRequestId } = req.params;
     const { status, remarks } = req.body;
-    const reviewedBy = (req as any).user.id;
+    const reviewer = (req as any).user;
+    const reviewedBy = reviewer.id;
 
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    if (reviewer.role === 'manager') {
+      const accessCheck = await pool.query(
+        `SELECT s.employee_id
+         FROM change_requests cr
+         JOIN schedules s ON cr.schedule_id = s.id
+         WHERE cr.id = $1`,
+        [changeRequestId]
+      );
+
+      if (accessCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Change request not found' });
+      }
+
+      const canReview = await isUserManagedBy(reviewer.id, accessCheck.rows[0].employee_id);
+      if (!canReview) {
+        return res.status(403).json({ error: 'Unauthorized to review this change request' });
+      }
     }
 
     // Update change request

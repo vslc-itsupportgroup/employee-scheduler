@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateToken, authorizeRole } from '../middleware/auth';
 import pool from '../config/database';
+import { getManagedUserIds, isUserManagedBy } from '../utils/hierarchy';
 
 const router = express.Router();
 
@@ -8,6 +9,7 @@ const router = express.Router();
 router.get('/by-date', authenticateToken, async (req, res) => {
   try {
     const { date } = req.query;
+    const user = (req as any).user;
 
     if (!date) {
       return res.status(400).json({ error: 'Date is required' });
@@ -15,7 +17,7 @@ router.get('/by-date', authenticateToken, async (req, res) => {
 
     console.log('Fetching schedules for date:', date);
 
-    const query = `
+    let query = `
       SELECT s.id, s.employee_id, s.shift_type_id, s.scheduled_date, s.status,
              st.code as shift_code, st.name as shift_name,
              u.first_name, u.last_name
@@ -23,10 +25,25 @@ router.get('/by-date', authenticateToken, async (req, res) => {
       JOIN shift_types st ON s.shift_type_id = st.id
       JOIN users u ON s.employee_id = u.id
       WHERE s.scheduled_date = $1
-      ORDER BY u.first_name, u.last_name
     `;
 
-    const result = await pool.query(query, [date]);
+    const params: any[] = [date];
+
+    if (user.role === 'manager') {
+      const managedUserIds = await getManagedUserIds(user.id);
+      if (managedUserIds.length === 0) {
+        return res.json({ data: [] });
+      }
+      query += ' AND s.employee_id = ANY($2::uuid[])';
+      params.push(managedUserIds);
+    } else if (user.role === 'employee') {
+      query += ' AND s.employee_id = $2';
+      params.push(user.id);
+    }
+
+    query += ' ORDER BY u.first_name, u.last_name';
+
+    const result = await pool.query(query, params);
     console.log('Found schedules:', result.rows);
     res.json({ data: result.rows });
   } catch (error: any) {
@@ -39,6 +56,7 @@ router.get('/by-date', authenticateToken, async (req, res) => {
 router.get('/month/:month/:year', authenticateToken, authorizeRole('manager', 'admin'), async (req, res) => {
   try {
     const { month, year } = req.params;
+    const user = (req as any).user;
 
     const monthNum = parseInt(month as string);
     const yearNum = parseInt(year as string);
@@ -52,7 +70,7 @@ router.get('/month/:month/:year', authenticateToken, authorizeRole('manager', 'a
 
     console.log(`Fetching all schedules for ${monthNum}/${yearNum} from ${startDate} to ${endDate}`);
 
-    const query = `
+    let query = `
       SELECT s.id, s.employee_id, s.shift_type_id, s.scheduled_date, s.status,
              st.code as shift_code, st.name as shift_name,
              u.first_name, u.last_name
@@ -60,10 +78,22 @@ router.get('/month/:month/:year', authenticateToken, authorizeRole('manager', 'a
       JOIN shift_types st ON s.shift_type_id = st.id
       JOIN users u ON s.employee_id = u.id
       WHERE s.scheduled_date >= $1 AND s.scheduled_date <= $2
-      ORDER BY s.scheduled_date, u.first_name, u.last_name
     `;
 
-    const result = await pool.query(query, [startDate, endDate]);
+    const params: any[] = [startDate, endDate];
+
+    if (user.role === 'manager') {
+      const managedUserIds = await getManagedUserIds(user.id);
+      if (managedUserIds.length === 0) {
+        return res.json({ data: [] });
+      }
+      query += ' AND s.employee_id = ANY($3::uuid[])';
+      params.push(managedUserIds);
+    }
+
+    query += ' ORDER BY s.scheduled_date, u.first_name, u.last_name';
+
+    const result = await pool.query(query, params);
     console.log(`Found ${result.rows.length} schedules for the month`);
     res.json({ data: result.rows });
   } catch (error: any) {
@@ -77,6 +107,20 @@ router.get('/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
     const { month, year } = req.query;
+    const currentUser = (req as any).user;
+
+    // Access control: admin can view any schedule; manager only for their reporting tree;
+    // employee only their own schedule.
+    if (currentUser.role === 'employee' && currentUser.id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    if (currentUser.role === 'manager' && currentUser.id !== userId) {
+      const canManageUser = await isUserManagedBy(currentUser.id, userId);
+      if (!canManageUser) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+    }
 
     let query = `
       SELECT s.id, s.employee_id, s.shift_type_id, s.scheduled_date, s.status,
@@ -132,6 +176,14 @@ router.post('/', authenticateToken, async (req, res) => {
     // Check if user is manager/admin or the employee themselves
     if (user.role !== 'manager' && user.role !== 'admin' && user.id !== employee_id) {
       return res.status(403).json({ error: 'You can only create schedules for yourself' });
+    }
+
+    // Managers can only create schedules for users in their reporting tree.
+    if (user.role === 'manager' && user.id !== employee_id) {
+      const canManageUser = await isUserManagedBy(user.id, employee_id);
+      if (!canManageUser) {
+        return res.status(403).json({ error: 'You can only create schedules for your assigned employees' });
+      }
     }
 
     // If manager/admin: directly update/create schedule (auto-approved)
@@ -194,6 +246,34 @@ router.put('/:scheduleId', authenticateToken, authorizeRole('manager', 'admin'),
   try {
     const { scheduleId } = req.params;
     const { shift_type_id, status } = req.body;
+    const user = (req as any).user;
+
+    if (user.role === 'manager') {
+      const accessCheck = await pool.query(
+        `SELECT s.id
+         FROM schedules s
+         WHERE s.id = $1
+           AND EXISTS (
+             WITH RECURSIVE managed_users AS (
+               SELECT id, manager_id
+               FROM users
+               WHERE manager_id = $2
+
+               UNION
+
+               SELECT u.id, u.manager_id
+               FROM users u
+               INNER JOIN managed_users mu ON u.manager_id = mu.id
+             )
+             SELECT 1 FROM managed_users WHERE id = s.employee_id
+           )`,
+        [scheduleId, user.id]
+      );
+
+      if (accessCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Unauthorized to update this schedule' });
+      }
+    }
 
     const result = await pool.query(
       `UPDATE schedules 

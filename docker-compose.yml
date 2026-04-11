@@ -1,63 +1,68 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: employee_scheduling
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: employee-scheduler-api
     environment:
-      DB_HOST: postgres
+      DB_HOST: ${DB_HOST}
       DB_PORT: 5432
-      DB_NAME: employee_scheduling
-      DB_USER: postgres
-      DB_PASSWORD: postgres123
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
       PORT: 5000
       NODE_ENV: production
-      JWT_SECRET: change_this_in_production_with_random_string
-      JWT_EXPIRATION: 7d
-      CORS_ORIGIN: http://localhost:3000
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      CORS_ORIGIN: ${BACKEND_CORS_ORIGIN}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
     ports:
       - "5000:5000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - employee-scheduler-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${FRONTEND_API_URL}
+    container_name: employee-scheduler-web
     ports:
-      - "3000:80"
+      - "80:80"
+      - "443:443"
     depends_on:
       - backend
     environment:
-      VITE_API_URL: http://localhost:5000/api
-
-volumes:
-  postgres_data:
+      VITE_API_URL: ${FRONTEND_API_URL}
+    restart: unless-stopped
+    networks:
+      - employee-scheduler-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
 
 networks:
-  default:
-    name: employee-scheduling-network
+  employee-scheduler-net:
+    driver: bridge

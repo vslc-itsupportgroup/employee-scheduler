@@ -11,7 +11,8 @@
     "db:init": "ts-node src/db/init.ts",
     "db:init:2fa": "ts-node src/db/initDatabase.ts",
     "db:disable-email": "ts-node src/db/disableEmailConfirmation.ts",
-    "seed": "ts-node scripts/seed.ts"
+    "seed": "ts-node scripts/seed.ts",
+    "test:hierarchy": "ts-node test-manager-hierarchy-visibility.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.0",

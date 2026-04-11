@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { authenticateToken, authorizeRole } from '../middleware/auth';
 import pool from '../config/database';
+import { getManagedUserIds, isUserManagedBy } from '../utils/hierarchy';
 
 const router = express.Router();
 
@@ -98,10 +99,14 @@ router.get('/', authenticateToken, authorizeRole('manager', 'admin'), async (req
     let query = 'SELECT id, email, first_name, last_name, role, department, manager_id, is_active, two_fa_enabled, color_code, password_expires_at FROM users';
     const params: any[] = [];
 
-    // Managers can only see their assigned employees
+    // Managers can see all users in their reporting tree (direct + indirect).
     if (user.role === 'manager') {
-      query += ' WHERE manager_id = $1 ORDER BY first_name, last_name';
-      params.push(user.id);
+      const managedUserIds = await getManagedUserIds(user.id);
+      if (managedUserIds.length === 0) {
+        return res.json([]);
+      }
+      query += ' WHERE id = ANY($1::uuid[]) ORDER BY first_name, last_name';
+      params.push(managedUserIds);
     } else {
       // Admins see all users
       query += ' ORDER BY first_name, last_name';
@@ -193,12 +198,9 @@ router.put('/:userId/password', authenticateToken, async (req, res) => {
     // Check authorization: user can change own password, or manager/admin can change their managed employees' passwords
     if (currentUser.id !== userId && currentUser.role !== 'admin') {
       if (currentUser.role === 'manager') {
-        // Verify the user being modified is an employee of this manager
-        const employeeCheck = await pool.query(
-          'SELECT id FROM users WHERE id = $1 AND manager_id = $2',
-          [userId, currentUser.id]
-        );
-        if (employeeCheck.rows.length === 0) {
+        // Verify the user being modified is in this manager's reporting tree.
+        const canManageUser = await isUserManagedBy(currentUser.id, userId);
+        if (!canManageUser) {
           return res.status(403).json({ error: 'You can only change password for your assigned employees' });
         }
       } else {
@@ -255,8 +257,13 @@ router.delete('/:userId', authenticateToken, async (req, res) => {
       // Admin: completely delete the user
       await pool.query('DELETE FROM users WHERE id = $1', [userId]);
       res.json({ message: 'User deleted successfully' });
-    } else if (currentUser.role === 'manager' && userCheck.rows[0].manager_id === currentUser.id) {
-      // Manager: deactivate (soft delete) their employee
+    } else if (currentUser.role === 'manager') {
+      // Manager: deactivate (soft delete) users in their reporting tree.
+      const canManageUser = await isUserManagedBy(currentUser.id, userId);
+      if (!canManageUser) {
+        return res.status(403).json({ error: 'Unauthorized to delete this user' });
+      }
+
       await pool.query(
         'UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
         [userId]
