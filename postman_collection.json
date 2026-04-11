@@ -1,0 +1,156 @@
+{
+  "info": {
+    "name": "Employee Scheduling API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"user@example.com\", \"password\": \"password123\", \"first_name\": \"John\", \"last_name\": \"Doe\", \"role\": \"employee\"}"
+            },
+            "url": {"raw": "http://localhost:5000/api/auth/register", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "auth", "register"]}
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"user@example.com\", \"password\": \"password123\"}"
+            },
+            "url": {"raw": "http://localhost:5000/api/auth/login", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "auth", "login"]}
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {"raw": "http://localhost:5000/api/auth/me", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "auth", "me"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules",
+      "item": [
+        {
+          "name": "Get Schedules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {"raw": "http://localhost:5000/api/schedules/{{userId}}", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "schedules", "{{userId}}"]}
+          }
+        },
+        {
+          "name": "Create Schedule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"employee_id\": \"uuid\", \"shift_type_id\": \"uuid\", \"scheduled_date\": \"2024-01-15\"}"
+            },
+            "url": {"raw": "http://localhost:5000/api/schedules", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "schedules"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Change Requests",
+      "item": [
+        {
+          "name": "Get Change Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {"raw": "http://localhost:5000/api/change-requests", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "change-requests"]}
+          }
+        },
+        {
+          "name": "Create Change Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"schedule_id\": \"uuid\", \"requested_shift_type_id\": \"uuid\", \"reason\": \"Family emergency\"}"
+            },
+            "url": {"raw": "http://localhost:5000/api/change-requests", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "change-requests"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "item": [
+        {
+          "name": "Get Pending Approvals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {"raw": "http://localhost:5000/api/approvals/pending", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "approvals", "pending"]}
+          }
+        },
+        {
+          "name": "Approve/Reject Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"status\": \"approved\", \"remarks\": \"Approved\"}"
+            },
+            "url": {"raw": "http://localhost:5000/api/approvals/{{changeRequestId}}", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "approvals", "{{changeRequestId}}"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "Get Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {"raw": "http://localhost:5000/api/audit", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["api", "audit"]}
+          }
+        }
+      ]
+    }
+  ]
+}
