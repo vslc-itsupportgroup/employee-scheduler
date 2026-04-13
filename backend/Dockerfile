@@ -4,10 +4,14 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci --only=production && \
-    npm run build
+# Install ALL dependencies (including dev for build)
+RUN npm ci
 
+# Copy source code
 COPY . .
+
+# Build TypeScript
+RUN npm run build
 
 EXPOSE 5000
 
